@@ -1,3 +1,29 @@
-work1
-work2
-work3
+FROM public.ecr.aws/amazonlinux/amazonlinux:2.0.20230628.0 AS builder 
+ARG EMBULK_VERSION=0.9.25 
+RUN yum update -y && yum install -y curl unzip && yum clean all 
+RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64-2.12.7.zip" -o "awscliv2.zip" && unzip awscliv2.zip && ./aws/install 
+RUN rm -rf /usr/local/aws-cli/v2/*/dist/aws_completer \ 
+    /usr/local/aws-cli/v2/*/bin/aws_completer \ 
+    /usr/local/aws-cli/v2/*/dist/awscli/examples 
+RUN curl --create-dirs -o /usr/bin/embulk -L "https://github.com/embulk/embulk/releases/download/v${EMBULK_VERSION}/embulk-${EMBULK_VERSION}.jar" && chmod +x /usr/bin/embulk 
+FROM public.ecr.aws/amazonlinux/amazonlinux:2.0.20230628.0 
+ENV LANG=C.UTF-8 
+RUN yum update -y && \ 
+    yum install -y java-1.8.0-openjdk-headless-1.8.0.372.b07-1.amzn2.0.1.x86_64 && \ 
+    yum install -y python3-3.7.16-1.amzn2.0.2.x86_64 && \ 
+    yum install -y jq-1.5-1.amzn2.0.2.x86_64 && \ 
+    yum clean all && \ 
+    pip3 install --no-cache-dir duo-client==5.0.1 && \ 
+    pip3 install --no-cache-dir dumb-init==1.2.5.post1 && \ 
+    pip3 install --no-cache-dir requests==2.31.0 && \
+    pip3 install --no-cache-dir urllib3==1.26.16 && \ 
+    ln -sf /usr/share/zoneinfo/Asia/Tokyo /etc/localtime 
+COPY --from=builder /usr/local/aws-cli/ /usr/local/aws-cli/ 
+COPY --from=builder /usr/local/bin/ /usr/local/bin/ 
+COPY --from=builder /usr/bin/embulk /usr/bin/embulk 
+WORKDIR /work 
+COPY Gemfile /work/ 
+COPY Gemfile.lock /work/ 
+COPY boot.sh /boot.sh 
+RUN chmod +x /boot.sh && embulk bundle 
+ENTRYPOINT [ "/usr/local/bin/dumb-init", "--single-child", "--", "/boot.sh" ] 
